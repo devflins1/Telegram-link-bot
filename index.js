@@ -1,25 +1,25 @@
 require("dotenv").config();
 
-const { Bot } = require("grammy");
+const { Bot, InlineKeyboard } = require("grammy");
 const mongoose = require("mongoose");
 
 const bot = new Bot(process.env.BOT_TOKEN);
 
-// DB connect
+// ---------------- DB ----------------
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB Connected"));
 
-// Model
+// ---------------- MODEL ----------------
 const Link = mongoose.model("Link", new mongoose.Schema({
   _id: String,
   files: Array,
   created_at: Number
 }));
 
-// 👑 Admin
+// ---------------- ADMINS ----------------
 const ADMINS = process.env.ADMIN_IDS.split(",").map(id => Number(id));
 
-// 🧠 Temp store (per admin)
+// ---------------- TEMP STORE ----------------
 const temp = {};
 
 // ---------------- START ----------------
@@ -63,7 +63,7 @@ bot.on("message", async (ctx) => {
   }
 });
 
-// ---------------- MAKE LINK ----------------
+// ---------------- MAKE LINK (COMMAND) ----------------
 bot.command("makelink", async (ctx) => {
   if (!ADMINS.includes(ctx.from.id)) return ctx.reply("❌ Admin only");
 
@@ -92,21 +92,58 @@ bot.command("makelink", async (ctx) => {
 bot.command("admin", async (ctx) => {
   if (!ADMINS.includes(ctx.from.id)) return;
 
-  const msg = await ctx.reply(
-`👑 Admin Panel
+  const kb = new InlineKeyboard()
+    .text("➕ Add Videos", "add_videos")
+    .row()
+    .text("🔗 Make Link", "make_link")
+    .row()
+    .text("🧹 Cancel Upload", "cancel");
 
-📌 Steps:
-1. Send multiple videos
-2. Then use /makelink
-
-Commands:
-/makelink
-`
-  );
+  const msg = await ctx.reply("👑 Admin Panel", {
+    reply_markup: kb
+  });
 
   try {
     await bot.api.pinChatMessage(ctx.chat.id, msg.message_id);
   } catch {}
+});
+
+// ---------------- BUTTONS ----------------
+bot.callbackQuery("add_videos", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.reply("📥 Send videos now...");
+});
+
+bot.callbackQuery("make_link", async (ctx) => {
+  await ctx.answerCallbackQuery();
+
+  const files = temp[ctx.from.id];
+
+  if (!files || files.length === 0) {
+    return ctx.reply("❌ No videos added");
+  }
+
+  const id = Math.random().toString(36).substring(2, 8);
+
+  await Link.create({
+    _id: id,
+    files,
+    created_at: Date.now()
+  });
+
+  delete temp[ctx.from.id];
+
+  const link = `https://t.me/${ctx.me.username}?start=${id}`;
+
+  await ctx.reply(`🔗 Link created:\n${link}`);
+});
+
+bot.callbackQuery("cancel", async (ctx) => {
+  await ctx.answerCallbackQuery();
+
+  delete temp[ctx.from.id];
+
+  await ctx.reply("🧹 Upload cancelled");
 });
 
 // ---------------- START BOT ----------------
