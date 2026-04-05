@@ -10,15 +10,19 @@ const bot = new Bot(process.env.BOT_TOKEN);
 const app = express();
 
 app.get("/", (req, res) => {
-  res.send("Bot is running 🚀");
+  res.send("Bot running 🚀");
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+
+app.listen(PORT, () => {
+  console.log("🌐 Server running on port " + PORT);
+});
 
 // ---------------- DB ----------------
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"));
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch(err => console.log(err));
 
 // ---------------- MODEL ----------------
 const Link = mongoose.model("Link", new mongoose.Schema({
@@ -50,7 +54,6 @@ bot.command("start", async (ctx) => {
     await new Promise(r => setTimeout(r, 500));
   }
 
-  // auto delete 30 min
   setTimeout(async () => {
     for (let mid of msgIds) {
       try {
@@ -60,13 +63,11 @@ bot.command("start", async (ctx) => {
   }, 30 * 60 * 1000);
 });
 
-// ---------------- CAPTURE VIDEOS ----------------
+// ---------------- CAPTURE ----------------
 bot.on("message", async (ctx) => {
   if (!ADMINS.includes(ctx.from.id)) return;
 
-  if (!temp[ctx.from.id]) {
-    temp[ctx.from.id] = [];
-  }
+  if (!temp[ctx.from.id]) temp[ctx.from.id] = [];
 
   if (ctx.message.video) {
     temp[ctx.from.id].push(ctx.message.video.file_id);
@@ -96,7 +97,7 @@ bot.command("makelink", async (ctx) => {
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
 
-  await ctx.reply(`🔗 Link created:\n${link}`);
+  await ctx.reply(`🔗 Link:\n${link}`);
 });
 
 // ---------------- ADMIN PANEL ----------------
@@ -108,15 +109,9 @@ bot.command("admin", async (ctx) => {
     .row()
     .text("🔗 Make Link", "make_link")
     .row()
-    .text("🧹 Cancel Upload", "cancel");
+    .text("🧹 Cancel", "cancel");
 
-  const msg = await ctx.reply("👑 Admin Panel", {
-    reply_markup: kb
-  });
-
-  try {
-    await bot.api.pinChatMessage(ctx.chat.id, msg.message_id);
-  } catch {}
+  await ctx.reply("👑 Admin Panel", { reply_markup: kb });
 });
 
 // ---------------- BUTTONS ----------------
@@ -131,7 +126,7 @@ bot.callbackQuery("make_link", async (ctx) => {
   const files = temp[ctx.from.id];
 
   if (!files || files.length === 0) {
-    return ctx.reply("❌ No videos added");
+    return ctx.reply("❌ No videos");
   }
 
   const id = Math.random().toString(36).substring(2, 8);
@@ -146,13 +141,13 @@ bot.callbackQuery("make_link", async (ctx) => {
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
 
-  await ctx.reply(`🔗 Link created:\n${link}`);
+  await ctx.reply(`🔗 Link:\n${link}`);
 });
 
 bot.callbackQuery("cancel", async (ctx) => {
   await ctx.answerCallbackQuery();
   delete temp[ctx.from.id];
-  await ctx.reply("🧹 Upload cancelled");
+  await ctx.reply("🧹 Cancelled");
 });
 
 // ---------------- START BOT ----------------
