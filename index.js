@@ -50,14 +50,14 @@ async function isAdmin(id) {
 // ---------------- ADMIN PANEL ----------------
 async function showAdminPanel(ctx) {
   const kb = new Keyboard()
-    .text("➕ Add Media")
-    .text("🔗 Make Link")
+    .text("Add Media")
+    .text("Make Link")
     .row()
-    .text("👑 Add Admin")
-    .text("❌ Remove Admin")
+    .text("Add Admin")
+    .text("Remove Admin")
     .row()
-    .text("📊 Stats")
-    .text("🧹 Cancel")
+    .text("Stats")
+    .text("Cancel")
     .resized();
 
   await ctx.reply("👑 Admin Panel", { reply_markup: kb });
@@ -79,21 +79,14 @@ bot.command("start", async (ctx) => {
 
     const total = await User.countDocuments();
 
-    const msg = `🆕 New User
-
-👤 Name: ${user.first_name}
-🔗 Username: @${user.username || "none"}
-🆔 ID: ${user.id}
-
-📊 Total Users: ${total}`;
-
     for (let adminId of ADMINS) {
       try {
-        await bot.api.sendMessage(adminId, msg);
+        await bot.api.sendMessage(adminId, `🆕 New User\n${user.first_name} (${user.id})\nTotal: ${total}`);
       } catch {}
     }
   }
 
+  // 🔗 LINK OPEN
   if (id) {
     const data = await Link.findById(id);
     if (!data) return ctx.reply("❌ Invalid link");
@@ -101,19 +94,18 @@ bot.command("start", async (ctx) => {
     const kb = new InlineKeyboard()
       .url("🔁 Watch Again", `https://t.me/${ctx.me.username}?start=${id}`);
 
-    await ctx.reply(
-      "⚠️ Note: All media will be deleted automatically after 30 minutes.",
-      { reply_markup: kb }
-    );
+    await ctx.reply("⚠️ Videos will auto delete in 30 minutes", {
+      reply_markup: kb
+    });
 
     let msgIds = [];
 
     for (let f of data.files) {
       let m;
       if (f.type === "video") {
-        m = await ctx.replyWithVideo(f.file_id);
+        m = await ctx.replyWithVideo(f.file_id, { protect_content: true });
       } else {
-        m = await ctx.replyWithPhoto(f.file_id);
+        m = await ctx.replyWithPhoto(f.file_id, { protect_content: true });
       }
       msgIds.push(m.message_id);
     }
@@ -129,11 +121,9 @@ bot.command("start", async (ctx) => {
     return;
   }
 
-  if (await isAdmin(user.id)) {
-    return showAdminPanel(ctx);
-  }
+  if (await isAdmin(user.id)) return showAdminPanel(ctx);
 
-  ctx.reply("👋 Send valid link");
+  ctx.reply("Send valid link");
 });
 
 // ---------------- CAPTURE MEDIA ----------------
@@ -143,112 +133,87 @@ bot.on("message", async (ctx) => {
   if (!temp[ctx.from.id]) temp[ctx.from.id] = [];
 
   if (ctx.message.video) {
-    temp[ctx.from.id].push({
-      type: "video",
-      file_id: ctx.message.video.file_id
-    });
+    temp[ctx.from.id].push({ type: "video", file_id: ctx.message.video.file_id });
     return ctx.reply(`✅ Video added (${temp[ctx.from.id].length})`);
   }
 
   if (ctx.message.photo) {
-    const photo = ctx.message.photo.pop();
-    temp[ctx.from.id].push({
-      type: "photo",
-      file_id: photo.file_id
-    });
+    const p = ctx.message.photo.pop();
+    temp[ctx.from.id].push({ type: "photo", file_id: p.file_id });
     return ctx.reply(`🖼 Photo added (${temp[ctx.from.id].length})`);
   }
 });
 
-// ---------------- BUTTONS ----------------
-bot.hears("➕ Add Media", async (ctx) => {
-  ctx.reply("📥 Send videos/photos...");
-});
-
 // ---------------- MAKE LINK ----------------
-bot.hears("🔗 Make Link", async (ctx) => {
+bot.hears(/make link/i, async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
+
+  if (temp[ctx.from.id + "_lock"]) return;
+  temp[ctx.from.id + "_lock"] = true;
 
   const files = temp[ctx.from.id];
 
   if (!files || files.length === 0) {
+    temp[ctx.from.id + "_lock"] = false;
     return ctx.reply("❌ No media added");
   }
 
   const id = Math.random().toString(36).substring(2, 8);
 
-  await Link.create({
-    _id: id,
-    files,
-    created_at: Date.now()
-  });
+  await Link.create({ _id: id, files, created_at: Date.now() });
 
   delete temp[ctx.from.id];
+  temp[ctx.from.id + "_lock"] = false;
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
-  await ctx.reply(`🔗 Link:\n${link}`);
-});
-
-// ---------------- STATS ----------------
-bot.hears("📊 Stats", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return;
-
-  const total = await User.countDocuments();
-  ctx.reply(`📊 Total Users: ${total}`);
+  ctx.reply(`🔗 Link:\n${link}`);
 });
 
 // ---------------- ADD ADMIN ----------------
 bot.command("addadmin", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return;
+  if (!(await isAdmin(ctx.from.id))) return ctx.reply("❌ Not allowed");
 
-  const args = ctx.message.text.split(" ");
+  const parts = ctx.message.text.split(" ");
+  const uid = Number(parts[1]);
 
-  if (args.length < 2) {
-    return ctx.reply("❌ Usage: /addadmin <user_id>");
-  }
+  if (!uid) return ctx.reply("❌ Usage: /addadmin 123");
 
-  const uid = Number(args[1]);
-
-  if (!uid) {
-    return ctx.reply("❌ Invalid ID");
-  }
-
-  const exists = await Admin.findOne({ user_id: uid });
-  if (exists) {
-    return ctx.reply("⚠️ Already admin");
-  }
+  const ex = await Admin.findOne({ user_id: uid });
+  if (ex) return ctx.reply("Already admin");
 
   await Admin.create({ user_id: uid });
-
-  ctx.reply(`✅ Admin added: ${uid}`);
+  ctx.reply(`✅ Added ${uid}`);
 });
 
 // ---------------- REMOVE ADMIN ----------------
 bot.command("removeadmin", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  const args = ctx.message.text.split(" ");
-
-  if (args.length < 2) {
-    return ctx.reply("❌ Usage: /removeadmin <user_id>");
-  }
-
-  const uid = Number(args[1]);
-
-  if (!uid) {
-    return ctx.reply("❌ Invalid ID");
-  }
+  const uid = Number(ctx.message.text.split(" ")[1]);
+  if (!uid) return ctx.reply("❌ Usage: /removeadmin 123");
 
   await Admin.deleteOne({ user_id: uid });
+  ctx.reply("Removed");
+});
 
-  ctx.reply(`🗑️ Removed: ${uid}`);
+// ---------------- STATS ----------------
+bot.hears(/stats/i, async (ctx) => {
+  if (!(await isAdmin(ctx.from.id))) return;
+
+  const total = await User.countDocuments();
+  ctx.reply(`Users: ${total}`);
 });
 
 // ---------------- CANCEL ----------------
-bot.hears("🧹 Cancel", async (ctx) => {
+bot.hears(/cancel/i, async (ctx) => {
   delete temp[ctx.from.id];
-  ctx.reply("🧹 Cancelled");
+  ctx.reply("Cancelled");
 });
 
-// ---------------- START BOT ----------------
-bot.start();
+// ---------------- SAFE START ----------------
+process.on("uncaughtException", console.error);
+process.on("unhandledRejection", console.error);
+
+bot.start({
+  drop_pending_updates: true
+});
