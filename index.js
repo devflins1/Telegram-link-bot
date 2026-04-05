@@ -68,7 +68,6 @@ bot.command("start", async (ctx) => {
   const id = ctx.match;
   const user = ctx.from;
 
-  // 🔔 New user tracking
   let existing = await User.findOne({ user_id: user.id });
 
   if (!existing) {
@@ -95,7 +94,6 @@ bot.command("start", async (ctx) => {
     }
   }
 
-  // 🔗 LINK OPEN
   if (id) {
     const data = await Link.findById(id);
     if (!data) return ctx.reply("❌ Invalid link");
@@ -131,7 +129,6 @@ bot.command("start", async (ctx) => {
     return;
   }
 
-  // 👑 ADMIN PANEL
   if (await isAdmin(user.id)) {
     return showAdminPanel(ctx);
   }
@@ -197,40 +194,54 @@ bot.hears("📊 Stats", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
   const total = await User.countDocuments();
-
   ctx.reply(`📊 Total Users: ${total}`);
 });
 
 // ---------------- ADD ADMIN ----------------
-bot.hears("👑 Add Admin", async (ctx) => {
-  ctx.reply("Reply to user with /addadmin");
-});
-
 bot.command("addadmin", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  if (!ctx.message.reply_to_message) {
-    return ctx.reply("Reply to user");
+  const args = ctx.message.text.split(" ");
+
+  if (args.length < 2) {
+    return ctx.reply("❌ Usage: /addadmin <user_id>");
   }
 
-  const uid = ctx.message.reply_to_message.from.id;
+  const uid = Number(args[1]);
+
+  if (!uid) {
+    return ctx.reply("❌ Invalid ID");
+  }
+
+  const exists = await Admin.findOne({ user_id: uid });
+  if (exists) {
+    return ctx.reply("⚠️ Already admin");
+  }
 
   await Admin.create({ user_id: uid });
-  ctx.reply("✅ Admin added");
+
+  ctx.reply(`✅ Admin added: ${uid}`);
 });
 
 // ---------------- REMOVE ADMIN ----------------
-bot.hears("❌ Remove Admin", async (ctx) => {
-  ctx.reply("Use /removeadmin <id>");
-});
-
 bot.command("removeadmin", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  const uid = Number(ctx.match);
+  const args = ctx.message.text.split(" ");
+
+  if (args.length < 2) {
+    return ctx.reply("❌ Usage: /removeadmin <user_id>");
+  }
+
+  const uid = Number(args[1]);
+
+  if (!uid) {
+    return ctx.reply("❌ Invalid ID");
+  }
+
   await Admin.deleteOne({ user_id: uid });
 
-  ctx.reply("🗑️ Removed");
+  ctx.reply(`🗑️ Removed: ${uid}`);
 });
 
 // ---------------- CANCEL ----------------
