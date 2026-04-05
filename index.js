@@ -2,8 +2,19 @@ require("dotenv").config();
 
 const { Bot, InlineKeyboard } = require("grammy");
 const mongoose = require("mongoose");
+const express = require("express");
 
 const bot = new Bot(process.env.BOT_TOKEN);
+
+// ---------------- EXPRESS SERVER ----------------
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("Bot is running 🚀");
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running on port " + PORT));
 
 // ---------------- DB ----------------
 mongoose.connect(process.env.MONGO_URI)
@@ -63,7 +74,7 @@ bot.on("message", async (ctx) => {
   }
 });
 
-// ---------------- MAKE LINK (COMMAND) ----------------
+// ---------------- MAKE LINK ----------------
 bot.command("makelink", async (ctx) => {
   if (!ADMINS.includes(ctx.from.id)) return ctx.reply("❌ Admin only");
 
@@ -140,9 +151,7 @@ bot.callbackQuery("make_link", async (ctx) => {
 
 bot.callbackQuery("cancel", async (ctx) => {
   await ctx.answerCallbackQuery();
-
   delete temp[ctx.from.id];
-
   await ctx.reply("🧹 Upload cancelled");
 });
 
