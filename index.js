@@ -1,159 +1,112 @@
 require("dotenv").config();
 
-const { Bot, InlineKeyboard } = require("grammy");
-const { BOT_TOKEN, ADMIN_IDS } = require("./config");
+const { Bot } = require("grammy");
+const mongoose = require("mongoose");
 
-require("./db");
+const bot = new Bot(process.env.BOT_TOKEN);
 
-const Admin = require("./models/Admin");
-const Link = require("./models/Link");
+// DB connect
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB Connected"));
 
-const bot = new Bot(BOT_TOKEN);
+// Model
+const Link = mongoose.model("Link", new mongoose.Schema({
+  _id: String,
+  files: Array,
+  created_at: Number
+}));
 
-// 🔐 ADMIN CHECK
-async function isAdmin(id) {
-  if (ADMIN_IDS.includes(id)) return true;
-  const a = await Admin.findOne({ user_id: id });
-  return !!a;
-}
+// 👑 Admin
+const ADMINS = process.env.ADMIN_IDS.split(",").map(id => Number(id));
 
-// 🧠 TEMP STORE
-const tempStore = {};
+// 🧠 Temp store (per admin)
+const temp = {};
 
 // ---------------- START ----------------
 bot.command("start", async (ctx) => {
-  const param = ctx.match;
+  const id = ctx.match;
 
-  if (!param) return ctx.reply("👋 Send valid link");
+  if (!id) return ctx.reply("👋 Send valid link");
 
-  const data = await Link.findById(param);
+  const data = await Link.findById(id);
   if (!data) return ctx.reply("❌ Invalid link");
 
-  const kb = new InlineKeyboard()
-    .text("🎬 All Videos", `videos_${param}`)
-    .text("🔗 All Links", `links_${param}`)
-    .row()
-    .text("🔁 Renew Again", `renew_${param}`);
+  let msgIds = [];
 
-  await ctx.reply("📦 Select option:", { reply_markup: kb });
-});
-
-// ---------------- CAPTURE ----------------
-bot.on("message", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return;
-
-  if (!tempStore[ctx.from.id]) {
-    tempStore[ctx.from.id] = { files: [], links: [] };
+  for (let f of data.files) {
+    const m = await ctx.replyWithVideo(f);
+    msgIds.push(m.message_id);
+    await new Promise(r => setTimeout(r, 500));
   }
 
-  const store = tempStore[ctx.from.id];
+  // auto delete 30 min
+  setTimeout(async () => {
+    for (let mid of msgIds) {
+      try {
+        await bot.api.deleteMessage(ctx.chat.id, mid);
+      } catch {}
+    }
+  }, 30 * 60 * 1000);
+});
+
+// ---------------- CAPTURE VIDEOS ----------------
+bot.on("message", async (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
+
+  if (!temp[ctx.from.id]) {
+    temp[ctx.from.id] = [];
+  }
 
   if (ctx.message.video) {
-    store.files.push(ctx.message.video.file_id);
-    return ctx.reply("🎬 Video saved");
-  }
-
-  if (ctx.message.text) {
-    store.links.push(ctx.message.text);
-    return ctx.reply("🔗 Link saved");
+    temp[ctx.from.id].push(ctx.message.video.file_id);
+    await ctx.reply(`✅ Video added (${temp[ctx.from.id].length})`);
   }
 });
 
-// ---------------- ADDLINK ----------------
-bot.command("addlink", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) {
-    return ctx.reply("❌ Only admin");
-  }
+// ---------------- MAKE LINK ----------------
+bot.command("makelink", async (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return ctx.reply("❌ Admin only");
 
-  const data = tempStore[ctx.from.id];
-  if (!data) return ctx.reply("❌ No data");
+  const files = temp[ctx.from.id];
+
+  if (!files || files.length === 0) {
+    return ctx.reply("❌ No videos added");
+  }
 
   const id = Math.random().toString(36).substring(2, 8);
 
   await Link.create({
     _id: id,
-    files: data.files,
-    links: data.links,
+    files,
     created_at: Date.now()
   });
 
-  delete tempStore[ctx.from.id];
+  delete temp[ctx.from.id];
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
-  await ctx.reply(`✅ Link:\n${link}`);
+
+  await ctx.reply(`🔗 Link created:\n${link}`);
 });
 
-// ---------------- BUTTONS ----------------
-bot.callbackQuery(/videos_(.+)/, async (ctx) => {
-  const id = ctx.match[1];
-  const data = await Link.findById(id);
-  if (!data) return;
+// ---------------- ADMIN PANEL ----------------
+bot.command("admin", async (ctx) => {
+  if (!ADMINS.includes(ctx.from.id)) return;
 
-  let msgIds = [];
+  const msg = await ctx.reply(
+`👑 Admin Panel
 
-  for (let f of data.files) {
-    const m = await ctx.replyWithVideo(f);
-    msgIds.push(m.message_id);
-    await new Promise(r => setTimeout(r, 800));
-  }
+📌 Steps:
+1. Send multiple videos
+2. Then use /makelink
 
-  autoDelete(ctx.chat.id, msgIds);
-});
+Commands:
+/makelink
+`
+  );
 
-bot.callbackQuery(/links_(.+)/, async (ctx) => {
-  const id = ctx.match[1];
-  const data = await Link.findById(id);
-  if (!data) return;
-
-  const txt = data.links.map((l, i) => `${i + 1}. ${l}`).join("\n");
-  await ctx.reply(txt || "No links");
-});
-
-bot.callbackQuery(/renew_(.+)/, async (ctx) => {
-  const id = ctx.match[1];
-  const data = await Link.findById(id);
-  if (!data) return;
-
-  let msgIds = [];
-
-  for (let f of data.files) {
-    const m = await ctx.replyWithVideo(f);
-    msgIds.push(m.message_id);
-  }
-
-  autoDelete(ctx.chat.id, msgIds);
-});
-
-// ---------------- AUTO DELETE ----------------
-function autoDelete(chatId, msgIds) {
-  setTimeout(async () => {
-    for (let id of msgIds) {
-      try {
-        await bot.api.deleteMessage(chatId, id);
-      } catch {}
-    }
-  }, 30 * 60 * 1000);
-}
-
-// ---------------- ADD ADMIN ----------------
-bot.command("addadmin", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return;
-
-  if (!ctx.message.reply_to_message) {
-    return ctx.reply("Reply to user");
-  }
-
-  const uid = ctx.message.reply_to_message.from.id;
-
-  if (ADMIN_IDS.includes(uid)) {
-    return ctx.reply("Already super admin");
-  }
-
-  const exists = await Admin.findOne({ user_id: uid });
-  if (exists) return ctx.reply("Already admin");
-
-  await Admin.create({ user_id: uid });
-  await ctx.reply("✅ Admin added");
+  try {
+    await bot.api.pinChatMessage(ctx.chat.id, msg.message_id);
+  } catch {}
 });
 
 // ---------------- START BOT ----------------
