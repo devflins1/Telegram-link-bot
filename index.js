@@ -28,12 +28,6 @@ const Admin = mongoose.model("Admin", new mongoose.Schema({
   user_id: Number
 }));
 
-const User = mongoose.model("User", new mongoose.Schema({
-  user_id: Number,
-  name: String,
-  username: String
-}));
-
 // ---------------- ADMINS ----------------
 const ADMINS = process.env.ADMIN_IDS.split(",").map(x => Number(x));
 
@@ -52,7 +46,7 @@ bot.command("start", async (ctx) => {
   const user = ctx.from;
   const id = ctx.match;
 
-  // 🔗 LINK OPEN
+  // 🔗 link open
   if (id) {
     const data = await Link.findById(id);
     if (!data) return ctx.reply("❌ Invalid link");
@@ -60,7 +54,7 @@ bot.command("start", async (ctx) => {
     const kb = new InlineKeyboard()
       .url("🔁 Watch Again", `https://t.me/${ctx.me.username}?start=${id}`);
 
-    await ctx.reply("⚠️ Videos auto delete in 30 minutes", { reply_markup: kb });
+    await ctx.reply("⚠️ Videos auto delete in 30 min", { reply_markup: kb });
 
     let ids = [];
 
@@ -85,7 +79,7 @@ bot.command("start", async (ctx) => {
     return;
   }
 
-  // 👑 ADMIN PANEL
+  // 👑 admin panel
   if (await isAdmin(user.id)) {
     const kb = new Keyboard()
       .text("Add Media")
@@ -108,7 +102,7 @@ bot.command("start", async (ctx) => {
 bot.on("message", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  // ignore text commands/buttons
+  // ❌ ignore text (buttons handled separately)
   if (ctx.message.text) return;
 
   if (!temp[ctx.from.id]) temp[ctx.from.id] = [];
@@ -126,7 +120,9 @@ bot.on("message", async (ctx) => {
 });
 
 // ---------------- MAKE LINK ----------------
-bot.hears(/^Make Link$/i, async (ctx) => {
+bot.hears("Make Link", async (ctx) => {
+  console.log("MAKE LINK CLICKED");
+
   if (!(await isAdmin(ctx.from.id))) return;
 
   const files = temp[ctx.from.id];
@@ -139,15 +135,24 @@ bot.hears(/^Make Link$/i, async (ctx) => {
   delete temp[ctx.from.id];
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
-  ctx.reply(`🔗 Link:\n${link}`);
+  ctx.reply(`🔗 Link created:\n${link}`);
 });
 
 // ---------------- ADD ADMIN ----------------
 bot.command("addadmin", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return ctx.reply("❌ Not allowed");
+  console.log("ADD ADMIN CLICKED");
 
-  const uid = Number(ctx.message.text.split(" ")[1]);
+  if (!(await isAdmin(ctx.from.id))) {
+    return ctx.reply("❌ Not admin");
+  }
+
+  const parts = ctx.message.text.split(" ");
+  const uid = Number(parts[1]);
+
   if (!uid) return ctx.reply("❌ Use: /addadmin 123");
+
+  const exists = await Admin.findOne({ user_id: uid });
+  if (exists) return ctx.reply("⚠️ Already admin");
 
   await Admin.create({ user_id: uid });
   ctx.reply(`✅ Added ${uid}`);
@@ -165,15 +170,15 @@ bot.command("removeadmin", async (ctx) => {
 });
 
 // ---------------- STATS ----------------
-bot.hears(/^Stats$/i, async (ctx) => {
+bot.hears("Stats", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  const total = await User.countDocuments();
-  ctx.reply(`Users: ${total}`);
+  const count = await Admin.countDocuments();
+  ctx.reply(`Admins: ${count}`);
 });
 
 // ---------------- CANCEL ----------------
-bot.hears(/^Cancel$/i, async (ctx) => {
+bot.hears("Cancel", async (ctx) => {
   delete temp[ctx.from.id];
   ctx.reply("Cancelled");
 });
