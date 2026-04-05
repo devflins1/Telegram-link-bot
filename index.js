@@ -35,7 +35,7 @@ const User = mongoose.model("User", new mongoose.Schema({
 }));
 
 // ---------------- ADMINS ----------------
-const ADMINS = process.env.ADMIN_IDS.split(",").map(id => Number(id));
+const ADMINS = process.env.ADMIN_IDS.split(",").map(x => Number(x));
 
 // ---------------- TEMP ----------------
 const temp = {};
@@ -47,44 +47,10 @@ async function isAdmin(id) {
   return !!a;
 }
 
-// ---------------- ADMIN PANEL ----------------
-async function showAdminPanel(ctx) {
-  const kb = new Keyboard()
-    .text("Add Media")
-    .text("Make Link")
-    .row()
-    .text("Add Admin")
-    .text("Remove Admin")
-    .row()
-    .text("Stats")
-    .text("Cancel")
-    .resized();
-
-  await ctx.reply("👑 Admin Panel", { reply_markup: kb });
-}
-
 // ---------------- START ----------------
 bot.command("start", async (ctx) => {
-  const id = ctx.match;
   const user = ctx.from;
-
-  let existing = await User.findOne({ user_id: user.id });
-
-  if (!existing) {
-    await User.create({
-      user_id: user.id,
-      name: user.first_name,
-      username: user.username
-    });
-
-    const total = await User.countDocuments();
-
-    for (let adminId of ADMINS) {
-      try {
-        await bot.api.sendMessage(adminId, `🆕 New User\n${user.first_name} (${user.id})\nTotal: ${total}`);
-      } catch {}
-    }
-  }
+  const id = ctx.match;
 
   // 🔗 LINK OPEN
   if (id) {
@@ -94,11 +60,9 @@ bot.command("start", async (ctx) => {
     const kb = new InlineKeyboard()
       .url("🔁 Watch Again", `https://t.me/${ctx.me.username}?start=${id}`);
 
-    await ctx.reply("⚠️ Videos will auto delete in 30 minutes", {
-      reply_markup: kb
-    });
+    await ctx.reply("⚠️ Videos auto delete in 30 minutes", { reply_markup: kb });
 
-    let msgIds = [];
+    let ids = [];
 
     for (let f of data.files) {
       let m;
@@ -107,11 +71,11 @@ bot.command("start", async (ctx) => {
       } else {
         m = await ctx.replyWithPhoto(f.file_id, { protect_content: true });
       }
-      msgIds.push(m.message_id);
+      ids.push(m.message_id);
     }
 
     setTimeout(async () => {
-      for (let mid of msgIds) {
+      for (let mid of ids) {
         try {
           await bot.api.deleteMessage(ctx.chat.id, mid);
         } catch {}
@@ -121,14 +85,31 @@ bot.command("start", async (ctx) => {
     return;
   }
 
-  if (await isAdmin(user.id)) return showAdminPanel(ctx);
+  // 👑 ADMIN PANEL
+  if (await isAdmin(user.id)) {
+    const kb = new Keyboard()
+      .text("Add Media")
+      .text("Make Link")
+      .row()
+      .text("Add Admin")
+      .text("Remove Admin")
+      .row()
+      .text("Stats")
+      .text("Cancel")
+      .resized();
+
+    return ctx.reply("👑 Admin Panel", { reply_markup: kb });
+  }
 
   ctx.reply("Send valid link");
 });
 
-// ---------------- CAPTURE MEDIA ----------------
+// ---------------- MEDIA ----------------
 bot.on("message", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
+
+  // ignore text commands/buttons
+  if (ctx.message.text) return;
 
   if (!temp[ctx.from.id]) temp[ctx.from.id] = [];
 
@@ -145,25 +126,17 @@ bot.on("message", async (ctx) => {
 });
 
 // ---------------- MAKE LINK ----------------
-bot.hears(/make link/i, async (ctx) => {
+bot.hears(/^Make Link$/i, async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  if (temp[ctx.from.id + "_lock"]) return;
-  temp[ctx.from.id + "_lock"] = true;
-
   const files = temp[ctx.from.id];
-
-  if (!files || files.length === 0) {
-    temp[ctx.from.id + "_lock"] = false;
-    return ctx.reply("❌ No media added");
-  }
+  if (!files || files.length === 0) return ctx.reply("❌ No media added");
 
   const id = Math.random().toString(36).substring(2, 8);
 
-  await Link.create({ _id: id, files, created_at: Date.now() });
+  await Link.create({ _id: id, files });
 
   delete temp[ctx.from.id];
-  temp[ctx.from.id + "_lock"] = false;
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
   ctx.reply(`🔗 Link:\n${link}`);
@@ -173,13 +146,8 @@ bot.hears(/make link/i, async (ctx) => {
 bot.command("addadmin", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return ctx.reply("❌ Not allowed");
 
-  const parts = ctx.message.text.split(" ");
-  const uid = Number(parts[1]);
-
-  if (!uid) return ctx.reply("❌ Usage: /addadmin 123");
-
-  const ex = await Admin.findOne({ user_id: uid });
-  if (ex) return ctx.reply("Already admin");
+  const uid = Number(ctx.message.text.split(" ")[1]);
+  if (!uid) return ctx.reply("❌ Use: /addadmin 123");
 
   await Admin.create({ user_id: uid });
   ctx.reply(`✅ Added ${uid}`);
@@ -190,14 +158,14 @@ bot.command("removeadmin", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
   const uid = Number(ctx.message.text.split(" ")[1]);
-  if (!uid) return ctx.reply("❌ Usage: /removeadmin 123");
+  if (!uid) return ctx.reply("❌ Use: /removeadmin 123");
 
   await Admin.deleteOne({ user_id: uid });
   ctx.reply("Removed");
 });
 
 // ---------------- STATS ----------------
-bot.hears(/stats/i, async (ctx) => {
+bot.hears(/^Stats$/i, async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
   const total = await User.countDocuments();
@@ -205,7 +173,7 @@ bot.hears(/stats/i, async (ctx) => {
 });
 
 // ---------------- CANCEL ----------------
-bot.hears(/cancel/i, async (ctx) => {
+bot.hears(/^Cancel$/i, async (ctx) => {
   delete temp[ctx.from.id];
   ctx.reply("Cancelled");
 });
@@ -214,6 +182,4 @@ bot.hears(/cancel/i, async (ctx) => {
 process.on("uncaughtException", console.error);
 process.on("unhandledRejection", console.error);
 
-bot.start({
-  drop_pending_updates: true
-});
+bot.start({ drop_pending_updates: true });
