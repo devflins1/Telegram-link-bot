@@ -23,13 +23,17 @@ const Link = mongoose.model("Link", new mongoose.Schema({
   created_at: Number
 }));
 
+const Temp = mongoose.model("Temp", new mongoose.Schema({
+  user_id: Number,
+  files: Array
+}));
+
 const Admin = mongoose.model("Admin", new mongoose.Schema({
   user_id: Number
 }));
 
 // ---------------- CONFIG ----------------
 const ADMINS = process.env.ADMIN_IDS.split(",").map(x => Number(x));
-const temp = {};
 
 // ---------------- ADMIN CHECK ----------------
 async function isAdmin(id) {
@@ -74,14 +78,13 @@ bot.command("start", async (ctx) => {
     return;
   }
 
-  // 👑 ADMIN PANEL (INLINE BUTTONS)
+  // 👑 ADMIN PANEL
   if (await isAdmin(user.id)) {
     const kb = new InlineKeyboard()
-      .text("➕ Add Media", "add_media")
-      .text("🔗 Make Link", "make_link")
+      .text("➕ Add Media", "add")
+      .text("🔗 Make Link", "make")
       .row()
-      .text("📊 Stats", "stats")
-      .text("❌ Cancel", "cancel");
+      .text("🗑 Clear", "clear");
 
     return ctx.reply("👑 Admin Panel", { reply_markup: kb });
   }
@@ -89,65 +92,93 @@ bot.command("start", async (ctx) => {
   ctx.reply("Send valid link");
 });
 
-// ---------------- MEDIA ----------------
+// ---------------- ADD MEDIA ----------------
 bot.on("message", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  // ignore text
-  if (ctx.message.text) return;
+  if (!ctx.message.video && !ctx.message.photo) return;
 
-  if (!temp[ctx.from.id]) temp[ctx.from.id] = [];
+  let file;
 
   if (ctx.message.video) {
-    temp[ctx.from.id].push({ type: "video", file_id: ctx.message.video.file_id });
-    return ctx.reply(`✅ Video added (${temp[ctx.from.id].length})`);
+    file = { type: "video", file_id: ctx.message.video.file_id };
+  } else {
+    const p = ctx.message.photo.pop();
+    file = { type: "photo", file_id: p.file_id };
   }
 
-  if (ctx.message.photo) {
-    const p = ctx.message.photo.pop();
-    temp[ctx.from.id].push({ type: "photo", file_id: p.file_id });
-    return ctx.reply(`🖼 Photo added (${temp[ctx.from.id].length})`);
+  let data = await Temp.findOne({ user_id: ctx.from.id });
+
+  if (!data) {
+    data = await Temp.create({
+      user_id: ctx.from.id,
+      files: [file]
+    });
+  } else {
+    data.files.push(file);
+    await data.save();
   }
+
+  return ctx.reply(`✅ Added (${data.files.length})`);
 });
 
-// ---------------- MAKE LINK (BUTTON) ----------------
-bot.callbackQuery("make_link", async (ctx) => {
+// ---------------- MAKE LINK ----------------
+bot.callbackQuery("make", async (ctx) => {
   await ctx.answerCallbackQuery();
 
   if (!(await isAdmin(ctx.from.id))) return;
 
-  const files = temp[ctx.from.id];
-  if (!files || files.length === 0) {
+  const data = await Temp.findOne({ user_id: ctx.from.id });
+
+  if (!data || data.files.length === 0) {
     return ctx.reply("❌ No media added");
   }
 
   const id = Math.random().toString(36).substring(2, 8);
 
-  await Link.create({ _id: id, files });
+  await Link.create({
+    _id: id,
+    files: data.files,
+    created_at: Date.now()
+  });
 
-  delete temp[ctx.from.id];
+  await Temp.deleteOne({ user_id: ctx.from.id });
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
+
   return ctx.reply(`🔗 Link created:\n${link}`);
 });
 
-// ---------------- MAKE LINK (COMMAND) ----------------
+// ---------------- COMMAND (backup) ----------------
 bot.command("makelink", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  const files = temp[ctx.from.id];
-  if (!files || files.length === 0) {
+  const data = await Temp.findOne({ user_id: ctx.from.id });
+
+  if (!data || data.files.length === 0) {
     return ctx.reply("❌ No media added");
   }
 
   const id = Math.random().toString(36).substring(2, 8);
 
-  await Link.create({ _id: id, files });
+  await Link.create({
+    _id: id,
+    files: data.files
+  });
 
-  delete temp[ctx.from.id];
+  await Temp.deleteOne({ user_id: ctx.from.id });
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
+
   return ctx.reply(`🔗 Link created:\n${link}`);
+});
+
+// ---------------- CLEAR ----------------
+bot.callbackQuery("clear", async (ctx) => {
+  await ctx.answerCallbackQuery();
+
+  await Temp.deleteOne({ user_id: ctx.from.id });
+  ctx.reply("🗑 Cleared");
 });
 
 // ---------------- SAFE START ----------------
