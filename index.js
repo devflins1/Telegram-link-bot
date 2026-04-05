@@ -1,6 +1,6 @@
 require("dotenv").config();
 
-const { Bot, Keyboard, InlineKeyboard } = require("grammy");
+const { Bot, InlineKeyboard } = require("grammy");
 const mongoose = require("mongoose");
 const express = require("express");
 
@@ -9,7 +9,6 @@ const bot = new Bot(process.env.BOT_TOKEN);
 // ---------------- EXPRESS ----------------
 const app = express();
 app.get("/", (req, res) => res.send("Bot running 🚀"));
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("🌐 Server running on " + PORT));
 
@@ -28,10 +27,8 @@ const Admin = mongoose.model("Admin", new mongoose.Schema({
   user_id: Number
 }));
 
-// ---------------- ADMINS ----------------
+// ---------------- CONFIG ----------------
 const ADMINS = process.env.ADMIN_IDS.split(",").map(x => Number(x));
-
-// ---------------- TEMP ----------------
 const temp = {};
 
 // ---------------- ADMIN CHECK ----------------
@@ -46,7 +43,7 @@ bot.command("start", async (ctx) => {
   const user = ctx.from;
   const id = ctx.match;
 
-  // 🔗 link open
+  // 🔗 open link
   if (id) {
     const data = await Link.findById(id);
     if (!data) return ctx.reply("❌ Invalid link");
@@ -70,27 +67,21 @@ bot.command("start", async (ctx) => {
 
     setTimeout(async () => {
       for (let mid of ids) {
-        try {
-          await bot.api.deleteMessage(ctx.chat.id, mid);
-        } catch {}
+        try { await bot.api.deleteMessage(ctx.chat.id, mid); } catch {}
       }
     }, 30 * 60 * 1000);
 
     return;
   }
 
-  // 👑 admin panel
+  // 👑 ADMIN PANEL (INLINE BUTTONS)
   if (await isAdmin(user.id)) {
-    const kb = new Keyboard()
-      .text("Add Media")
-      .text("Make Link")
+    const kb = new InlineKeyboard()
+      .text("➕ Add Media", "add_media")
+      .text("🔗 Make Link", "make_link")
       .row()
-      .text("Add Admin")
-      .text("Remove Admin")
-      .row()
-      .text("Stats")
-      .text("Cancel")
-      .resized();
+      .text("📊 Stats", "stats")
+      .text("❌ Cancel", "cancel");
 
     return ctx.reply("👑 Admin Panel", { reply_markup: kb });
   }
@@ -102,7 +93,7 @@ bot.command("start", async (ctx) => {
 bot.on("message", async (ctx) => {
   if (!(await isAdmin(ctx.from.id))) return;
 
-  // ❌ ignore text (buttons handled separately)
+  // ignore text
   if (ctx.message.text) return;
 
   if (!temp[ctx.from.id]) temp[ctx.from.id] = [];
@@ -119,14 +110,16 @@ bot.on("message", async (ctx) => {
   }
 });
 
-// ---------------- MAKE LINK ----------------
-bot.hears("Make Link", async (ctx) => {
-  console.log("MAKE LINK CLICKED");
+// ---------------- MAKE LINK (BUTTON) ----------------
+bot.callbackQuery("make_link", async (ctx) => {
+  await ctx.answerCallbackQuery();
 
   if (!(await isAdmin(ctx.from.id))) return;
 
   const files = temp[ctx.from.id];
-  if (!files || files.length === 0) return ctx.reply("❌ No media added");
+  if (!files || files.length === 0) {
+    return ctx.reply("❌ No media added");
+  }
 
   const id = Math.random().toString(36).substring(2, 8);
 
@@ -135,52 +128,26 @@ bot.hears("Make Link", async (ctx) => {
   delete temp[ctx.from.id];
 
   const link = `https://t.me/${ctx.me.username}?start=${id}`;
-  ctx.reply(`🔗 Link created:\n${link}`);
+  return ctx.reply(`🔗 Link created:\n${link}`);
 });
 
-// ---------------- ADD ADMIN ----------------
-bot.command("addadmin", async (ctx) => {
-  console.log("ADD ADMIN CLICKED");
+// ---------------- MAKE LINK (COMMAND) ----------------
+bot.command("makelink", async (ctx) => {
+  if (!(await isAdmin(ctx.from.id))) return;
 
-  if (!(await isAdmin(ctx.from.id))) {
-    return ctx.reply("❌ Not admin");
+  const files = temp[ctx.from.id];
+  if (!files || files.length === 0) {
+    return ctx.reply("❌ No media added");
   }
 
-  const parts = ctx.message.text.split(" ");
-  const uid = Number(parts[1]);
+  const id = Math.random().toString(36).substring(2, 8);
 
-  if (!uid) return ctx.reply("❌ Use: /addadmin 123");
+  await Link.create({ _id: id, files });
 
-  const exists = await Admin.findOne({ user_id: uid });
-  if (exists) return ctx.reply("⚠️ Already admin");
-
-  await Admin.create({ user_id: uid });
-  ctx.reply(`✅ Added ${uid}`);
-});
-
-// ---------------- REMOVE ADMIN ----------------
-bot.command("removeadmin", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return;
-
-  const uid = Number(ctx.message.text.split(" ")[1]);
-  if (!uid) return ctx.reply("❌ Use: /removeadmin 123");
-
-  await Admin.deleteOne({ user_id: uid });
-  ctx.reply("Removed");
-});
-
-// ---------------- STATS ----------------
-bot.hears("Stats", async (ctx) => {
-  if (!(await isAdmin(ctx.from.id))) return;
-
-  const count = await Admin.countDocuments();
-  ctx.reply(`Admins: ${count}`);
-});
-
-// ---------------- CANCEL ----------------
-bot.hears("Cancel", async (ctx) => {
   delete temp[ctx.from.id];
-  ctx.reply("Cancelled");
+
+  const link = `https://t.me/${ctx.me.username}?start=${id}`;
+  return ctx.reply(`🔗 Link created:\n${link}`);
 });
 
 // ---------------- SAFE START ----------------
